@@ -1,0 +1,57 @@
+# SpaceFree
+
+A Windows desktop app that scans your whole disk, shows **why it is full**, and helps you clean it safely.
+Everything runs offline on your PC - no file names or data are sent anywhere.
+
+## Run
+
+```
+pip install -r requirements.txt
+python main.py
+```
+
+## What it does
+
+- Scans all fixed drives (removable ones optional) with a multi-threaded walker.
+- Labels what it finds:
+  - **Bad** - safe to delete (temp files, caches, crash dumps, old installers, duplicate copies, stale `node_modules`).
+  - **Review** - probably removable but check first (virtual disks, big unused files, large old downloads).
+  - **Important** - Windows, Program Files, ProgramData, and your personal folders. Never deletable here.
+  - **Good** - everything else that looks normal.
+- Every finding includes a plain-English reason.
+- Tabs: Summary (biggest folders + categories), Cleanup (tick and remove), Folders (size tree), Size map (treemap).
+- Export the findings to CSV.
+
+## Safety
+
+- Deleting only **moves items to the Recycle Bin**, after a confirmation dialog, and re-checks the protection rules first.
+- System folders, drive roots, core user folders and system files (`pagefile.sys`, `hiberfil.sys`) cannot be deleted.
+- Personal files (Documents, Pictures, Desktop, Videos, Music, OneDrive) are never auto-labelled Bad.
+- Cloud-only OneDrive files are ignored (they use no disk space).
+- Caveat: Windows may delete items permanently if they are larger than the Recycle Bin's size limit.
+
+## Layout
+
+```
+main.py                 app entry
+spacefree/scanner.py    parallel disk walk + folder size tree
+spacefree/rules.py      Bad / Review / Good / Important rules
+spacefree/duplicates.py size -> partial hash -> full hash
+spacefree/safety.py     protected paths
+spacefree/cleaner.py    Recycle Bin moves
+spacefree/ui/           PyQt6 interface
+tests/                  pytest suite
+```
+
+## Tests
+
+```
+python -m pytest
+```
+
+## Build an .exe (optional)
+
+```
+pip install pyinstaller
+pyinstaller --noconsole --onefile --name SpaceFree main.py
+```
