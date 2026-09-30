@@ -6,7 +6,7 @@ import time
 from typing import Callable
 
 from PyQt6.QtCore import QSize, Qt, QTimer, QUrl
-from PyQt6.QtGui import QImageReader, QPixmap
+from PyQt6.QtGui import QBrush, QImageReader, QPixmap
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 from PyQt6.QtWidgets import (
@@ -14,8 +14,11 @@ from PyQt6.QtWidgets import (
     QSplitter, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ..advisor import DELETE, EDUCATIONAL, KEEP, Advice
+from ..advisor import REVIEW as V_REVIEW
 from ..filetypes import AUDIO, IMAGE, MEDIA_TYPES, VIDEO, type_of
 from ..models import FileRec, fmt_size
+from .theme import VERDICT_COLORS
 from .util import NumItem, open_file, open_in_explorer
 
 LIVE_CAP = 20000
@@ -37,11 +40,15 @@ class MediaTab(QWidget):
         self._rows = 0
         self._final = False
         self._checked_restore: set[str] = set()
+        self.advice: dict[str, Advice] = {}
 
         v = QVBoxLayout(self)
         bar = QHBoxLayout()
         self.type_box = QComboBox()
         self.type_box.addItems(["All media", IMAGE, VIDEO, AUDIO])
+        self.verdict_box = QComboBox()
+        self.verdict_box.addItems(["Any verdict", DELETE, V_REVIEW, KEEP, EDUCATIONAL])
+        self.verdict_box.currentIndexChanged.connect(self.apply_filters)
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search name or folder...")
         self.count = QLabel("")
@@ -50,18 +57,20 @@ class MediaTab(QWidget):
         self.search.textChanged.connect(self.apply_filters)
         bar.addWidget(QLabel("Show:"))
         bar.addWidget(self.type_box)
+        bar.addWidget(self.verdict_box)
         bar.addWidget(self.search, 1)
         bar.addWidget(self.count)
         v.addLayout(bar)
 
         split = QSplitter(Qt.Orientation.Horizontal)
-        self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(["", "Type", "Name", "Size", "Modified", "Folder"])
+        self.table = QTableWidget(0, 7)
+        self.table.setHorizontalHeaderLabels(["", "Type", "Name", "Size", "Modified", "Folder", "Verdict"])
         h = self.table.horizontalHeader()
         h.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
         h.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         self.table.setColumnWidth(0, 34)
-        self.table.setColumnWidth(2, 260)
+        self.table.setColumnWidth(2, 240)
+        self.table.setColumnWidth(6, 90)
         self.table.verticalHeader().hide()
         self.table.setAlternatingRowColors(True)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -233,11 +242,20 @@ class MediaTab(QWidget):
             folder = QTableWidgetItem(os.path.dirname(rec.path))
             folder.setToolTip(rec.path)
             items = [chk, QTableWidgetItem(kind), QTableWidgetItem(name), NumItem(fmt_size(rec.size), rec.size),
-                     NumItem(time.strftime("%Y-%m-%d", time.localtime(rec.mtime)), rec.mtime), folder]
+                     NumItem(time.strftime("%Y-%m-%d", time.localtime(rec.mtime)), rec.mtime), folder,
+                     self._verdict_item(rec.path)]
             for c, it in enumerate(items):
                 self.table.setItem(start + i, c, it)
         self.table.blockSignals(False)
         self._rows += len(recs)
+
+    def _verdict_item(self, path: str) -> QTableWidgetItem:
+        adv = self.advice.get(path)
+        it = QTableWidgetItem(adv.verdict if adv else "...")
+        if adv:
+            it.setForeground(QBrush(VERDICT_COLORS[adv.verdict]))
+            it.setToolTip(adv.reason)
+        return it
 
     def _flush(self) -> None:
         cap = FINAL_CAP if self._final else LIVE_CAP
@@ -254,9 +272,10 @@ class MediaTab(QWidget):
         self._add_rows(chunk)
         self.update_count()
 
-    def finalize(self, all_media: list[FileRec]) -> None:
+    def finalize(self, all_media: list[FileRec], advice: dict[str, Advice] | None = None) -> None:
         """Scan finished: rebuild with the biggest files first, then enable sorting."""
         checked = {r.path for r in self.checked_recs()}
+        self.advice = advice or {}
         self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
         self._rows = 0
@@ -272,11 +291,13 @@ class MediaTab(QWidget):
 
     def apply_filters(self) -> None:
         kind = self.type_box.currentText()
+        verdict = self.verdict_box.currentText()
         text = self.search.text().lower()
         shown = 0
         for r in range(self.table.rowCount()):
             rec: FileRec = self.table.item(r, 0).data(Qt.ItemDataRole.UserRole)
             ok = ((kind == "All media" or self.table.item(r, 1).text() == kind) and
+                  (verdict == "Any verdict" or self.table.item(r, 6).text() == verdict) and
                   (not text or text in rec.path.lower()))
             self.table.setRowHidden(r, not ok)
             shown += ok
@@ -310,7 +331,8 @@ class MediaTab(QWidget):
             return
         self.player.stop()
         self.player.setSource(QUrl())  # release the file handle before deleting
-        self._trash_cb([(r.path, r.size, "Media") for r in recs])
+        self._trash_cb([(r.path, r.size, self.advice[r.path].verdict if r.path in self.advice else KEEP)
+                        for r in recs])
 
     def remove_paths(self, paths: set[str]) -> None:
         self.table.blockSignals(True)

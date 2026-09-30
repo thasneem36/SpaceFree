@@ -24,6 +24,12 @@ python main.py
 - **Open folder** buttons (and double-click / right-click) jump straight to the file or folder in Explorer for review.
 - Tabs: Summary, Cleanup (tick and remove), **Media** (every image, video and audio file with a real preview and playback), Folders (size tree), Size map (treemap).
 - Export the findings to CSV.
+- **Advisor** (System One style): a small offline model asks five narrow questions about every finding and media file
+  (is it educational? recreatable? irreplaceable? how stale? what kind?), each answered as a typed probability with a
+  confidence, never free text. Plain code then turns the answers into one verdict:
+  **Delete** (safe, recreatable), **Review** (not sure), **Keep** (good, no need to delete), **Educational** (course/lecture/book
+  material, protected from bulk delete). The Advisor tab shows it in four groups with a one-click "move everything marked Delete".
+  Nothing leaves your PC.
 
 ## Safety
 
@@ -41,6 +47,7 @@ spacefree/scanner.py    parallel disk walk + folder size tree
 spacefree/rules.py      Bad / Review / Good / Important rules
 spacefree/duplicates.py size -> partial hash -> full hash
 spacefree/safety.py     protected paths
+spacefree/advisor/      the Advisor: questions, features, model, decide
 spacefree/cleaner.py    Recycle Bin moves
 spacefree/ui/           PyQt6 interface
 tests/                  pytest suite

@@ -32,3 +32,10 @@ QGroupBox::title { subcontrol-origin: margin; left: 10px; color: #8b949e; }
 QLabel#muted { color: #8b949e; }
 QLabel#big { font-size: 26px; font-weight: bold; }
 """
+
+VERDICT_COLORS = {
+    "Delete": QColor("#e5534b"),
+    "Review": QColor("#d29922"),
+    "Keep": QColor("#3fb950"),
+    "Educational": QColor("#58a6ff"),
+}

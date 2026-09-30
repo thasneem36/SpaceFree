@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from . import safety
+from .advisor import Advice, Item, advise_all, from_finding, from_media
 from .duplicates import find_duplicates
 from .models import BAD, REVIEW, FileRec, Finding, ScanResult
 from .rules import classify_dir, classify_file, age_days, MIN_FINDING
@@ -24,6 +25,7 @@ class Analysis:
     flagged_dirs: set[str] = field(default_factory=set)
     important_bytes: int = 0
     top_dirs: list[tuple[str, int]] = field(default_factory=list)
+    advice: dict[str, Advice] = field(default_factory=dict)
 
     def total(self, label: str) -> int:
         return sum(f.size for f in self.findings if f.label == label)
@@ -115,6 +117,14 @@ def analyze(scan: ScanResult, cancel: threading.Event | None = None,
                     f"Identical copy of {keep.path}", age_days(r.mtime, r.atime), True, keep.path))
 
     out.findings.sort(key=lambda f: f.size, reverse=True)
+
+    # 3b) advisor: one simple verdict for every finding and every media file
+    if status:
+        status("Advisor is deciding what to keep...")
+    items = [from_finding(f) for f in out.findings]
+    known = {f.path for f in out.findings}
+    items += [from_media(r) for r in scan.media if r.path not in known]
+    out.advice = advise_all(items)
 
     # 4) biggest folders (answers "why is my disk full?")
     def depth(p: str) -> int:

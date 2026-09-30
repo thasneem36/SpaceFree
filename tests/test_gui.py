@@ -48,6 +48,11 @@ def test_live_scan_fills_every_tab(tmp_path, monkeypatch):
     assert w.media_tab.table.rowCount() == 5
     assert w.type_table.rowCount() > 0
     assert w.tree.topLevelItemCount() == 1
+    # advisor: the __pycache__ is Delete, and the tab + verdict columns are filled in
+    assert w.advice and w.advisor_tab.tree.topLevelItemCount() == 4
+    assert w.advisor_tab.delete_btn.isEnabled()
+    assert any(w.table.item(r, 1).text() == "Delete" for r in range(w.table.rowCount()))
+    assert w.media_tab.table.item(0, 6).text() in ("Keep", "Review", "Delete", "Educational")
     w.media_tab.table.selectRow(0)
     app.processEvents()
     assert w.media_tab.image_label.pixmap() is not None

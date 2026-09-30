@@ -15,13 +15,16 @@ from PyQt6.QtWidgets import (
 )
 
 from .. import cleaner, recycle, scanner
+from ..advisor import DELETE, EDUCATIONAL, KEEP, Advice, advise_one, from_finding
+from ..advisor import REVIEW as V_REVIEW
 from ..analysis import Analysis, analyze
 from ..filetypes import ALL_TYPES
 from ..live import LiveAnalyzer
 from ..models import BAD, GOOD, IMPORTANT, REVIEW, Finding, ScanResult, fmt_size
 from ..rules import label_for_dir
+from .advisor_tab import AdvisorTab
 from .media_tab import MediaTab
-from .theme import LABEL_COLORS
+from .theme import LABEL_COLORS, VERDICT_COLORS
 from .treemap_widget import TreemapWidget
 from .util import NumItem, open_in_explorer
 
@@ -68,6 +71,7 @@ class MainWindow(QMainWindow):
         self.drive_boxes: list[tuple[QCheckBox, scanner.Drive]] = []
         self.row_of: dict[str, int] = {}
         self.media_cursor = 0
+        self.advice: dict[str, Advice] = {}
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -75,6 +79,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._build_sidebar())
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_summary(), "Summary")
+        self.advisor_tab = AdvisorTab(self.confirm_and_trash)
+        self.tabs.addTab(self.advisor_tab, "Advisor")
         self.tabs.addTab(self._build_cleanup(), "Cleanup")
         self.media_tab = MediaTab(self.confirm_and_trash)
         self.tabs.addTab(self.media_tab, "Media")
@@ -227,7 +233,7 @@ class MainWindow(QMainWindow):
         v = QVBoxLayout(w)
         bar = QHBoxLayout()
         self.filter_label = QComboBox()
-        self.filter_label.addItems(["All", BAD, REVIEW])
+        self.filter_label.addItems(["All", DELETE, V_REVIEW, KEEP, EDUCATIONAL])
         self.filter_cat = QComboBox()
         self.filter_cat.addItem("All categories")
         self.search = QLineEdit()
@@ -241,13 +247,14 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.search, 1)
         v.addLayout(bar)
 
-        self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels(["", "Label", "Category", "Size", "Age (days)", "Path", "Reason"])
+        self.table = QTableWidget(0, 8)
+        self.table.setHorizontalHeaderLabels(
+            ["", "Verdict", "Label", "Category", "Size", "Age (days)", "Path", "Reason"])
         h = self.table.horizontalHeader()
-        h.setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
-        h.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        h.setSectionResizeMode(6, QHeaderView.ResizeMode.Interactive)
+        h.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
         self.table.setColumnWidth(0, 34)
-        self.table.setColumnWidth(5, 420)
+        self.table.setColumnWidth(6, 380)
         self.table.verticalHeader().hide()
         self.table.setAlternatingRowColors(True)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -260,8 +267,8 @@ class MainWindow(QMainWindow):
 
         foot = QHBoxLayout()
         for text, fn in (("Open folder", lambda: self.open_row_folder(self.table.currentRow())),
-                         ("Select all Bad", lambda: self.select_label(BAD)),
-                         ("Select none", lambda: self.select_label(None)),
+                         ("Select all Delete", lambda: self.select_verdict(DELETE)),
+                         ("Select none", lambda: self.select_verdict(None)),
                          ("Export CSV", self.export_csv)):
             b = QPushButton(text)
             b.clicked.connect(fn)
@@ -277,15 +284,21 @@ class MainWindow(QMainWindow):
         return w
 
     def _make_row(self, r: int, f: Finding) -> None:
+        adv = self.advice.get(f.path)
+        if adv is None:
+            adv = self.advice[f.path] = advise_one(from_finding(f))
         chk = QTableWidgetItem()
+        can_tick = f.deletable and adv.verdict != EDUCATIONAL  # learning material is protected
         chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-                     if f.deletable else Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                     if can_tick else Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         chk.setCheckState(Qt.CheckState.Checked if f.path in self._keep_checked else Qt.CheckState.Unchecked)
         chk.setData(Qt.ItemDataRole.UserRole, f)
-        reason = f.reason if f.deletable else f"{f.reason}  (manual action - not deletable here)"
+        reason = adv.reason if f.deletable else f"{adv.reason}  (manual action - not deletable here)"
         path = QTableWidgetItem(f.path)
         path.setToolTip(f.path)
-        items = [chk, self._colored(f.label, f.label), QTableWidgetItem(f.category),
+        verdict = QTableWidgetItem(adv.verdict)
+        verdict.setForeground(QBrush(VERDICT_COLORS[adv.verdict]))
+        items = [chk, verdict, self._colored(f.label, f.label), QTableWidgetItem(f.category),
                  NumItem(fmt_size(f.size), f.size), NumItem(str(f.age_days), f.age_days), path,
                  QTableWidgetItem(reason)]
         for c, it in enumerate(items):
@@ -321,7 +334,7 @@ class MainWindow(QMainWindow):
             self._make_row(r, f)
         self._keep_checked = set()
         self.table.setSortingEnabled(True)
-        self.table.sortItems(3, Qt.SortOrder.DescendingOrder)
+        self.table.sortItems(4, Qt.SortOrder.DescendingOrder)
         self.table.blockSignals(False)
         self.row_of.clear()
         cats = sorted({f.category for f in findings})
@@ -344,18 +357,19 @@ class MainWindow(QMainWindow):
         text = self.search.text().lower()
         for r in range(self.table.rowCount()):
             f = self.finding_at(r)
-            show = ((lab == "All" or f.label == lab) and
+            show = ((lab == "All" or self.advice[f.path].verdict == lab) and
                     (cat == "All categories" or f.category == cat) and
                     (not text or text in f.path.lower()))
             self.table.setRowHidden(r, not show)
 
-    def select_label(self, label: str | None) -> None:
+    def select_verdict(self, verdict: str | None) -> None:
         self.table.blockSignals(True)
         for r in range(self.table.rowCount()):
-            f = self.finding_at(r)
-            if f.deletable:
-                on = label is not None and f.label == label and not self.table.isRowHidden(r)
-                self.table.item(r, 0).setCheckState(Qt.CheckState.Checked if on else Qt.CheckState.Unchecked)
+            it = self.table.item(r, 0)
+            if it.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                on = (verdict is not None and self.advice[self.finding_at(r).path].verdict == verdict
+                      and not self.table.isRowHidden(r))
+                it.setCheckState(Qt.CheckState.Checked if on else Qt.CheckState.Unchecked)
         self.table.blockSignals(False)
         self.update_selection_total()
 
@@ -404,19 +418,20 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Nothing selected", "Tick the items you want to remove first.")
             return
         items = [self.finding_at(r) for r in rows]
-        self.confirm_and_trash([(f.path, f.size, f.label) for f in items])
+        self.confirm_and_trash([(f.path, f.size, self.advice[f.path].verdict) for f in items])
 
     def confirm_and_trash(self, items: list[tuple[str, int, str]]) -> None:
         if self.scanning:
             QMessageBox.information(self, "Scan running", "Wait for the scan to finish before deleting.")
             return
         total = sum(s for _, s, _ in items)
-        review = sum(1 for _, _, lab in items if lab in (REVIEW, "Media"))
+        review = sum(1 for _, _, v in items if v != DELETE)
         msg = (f"Move {len(items)} items ({fmt_size(total)}) to the Recycle Bin?\n\n"
                "You can restore them from the Recycle Bin. Items larger than the Recycle Bin's "
                "size limit may be deleted permanently by Windows.")
         if review:
-            msg += f"\n\n{review} of these are personal/'Review' items - check that you don't need them."
+            msg += (f"\n\n{review} of these are NOT marked 'Delete' by the Advisor "
+                    "(Review/Keep/Educational) - check that you don't need them.")
         if QMessageBox.question(self, "Confirm", msg) != QMessageBox.StandardButton.Yes:
             return
         dlg = QProgressDialog("Moving to Recycle Bin...", "", 0, len(items), self)
@@ -440,6 +455,10 @@ class MainWindow(QMainWindow):
             self.fill_categories(self.analysis.findings)
             self.card_bad[1].setText(fmt_size(self.analysis.total(BAD)))
             self.card_review[1].setText(fmt_size(self.analysis.total(REVIEW)))
+            for d in done:
+                self.analysis.advice.pop(d, None)
+            self.advice = self.analysis.advice
+            self.advisor_tab.set_advice(self.advice)
         self.media_tab.remove_paths(done)
         self.refresh_recycle()
         text = (f"Moved {len(ok)} items to the Recycle Bin ({fmt_size(freed)}).\n"
@@ -577,6 +596,8 @@ class MainWindow(QMainWindow):
         self.row_of.clear()
         self.media_tab.clear()
         self.media_cursor = 0
+        self.advice = {}
+        self.advisor_tab.set_advice({})
         self.tree.clear()
         for c in (self.card_bad, self.card_review, self.card_important, self.card_good):
             c[1].setText("-")
@@ -654,8 +675,10 @@ class MainWindow(QMainWindow):
         self.fill_top_dirs(analysis.top_dirs, analysis.flagged_dirs)
         self.fill_types(s.type_stats)
         self.fill_categories(analysis.findings)
+        self.advice = analysis.advice
         self.populate_table(analysis.findings)
-        self.media_tab.finalize(s.media)
+        self.advisor_tab.set_advice(analysis.advice)
+        self.media_tab.finalize(s.media, analysis.advice)
         self.ensure_tree_roots()
         self.refresh_tree()
         self.treemap.set_analysis(analysis)
