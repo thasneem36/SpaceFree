@@ -52,6 +52,8 @@ class ScanResult:
     files_seen: int = 0
     errors: int = 0
     cancelled: bool = False
+    media: list[FileRec] = field(default_factory=list)
+    type_stats: dict[str, tuple[int, int]] = field(default_factory=dict)
 
     @property
     def total_size(self) -> int:

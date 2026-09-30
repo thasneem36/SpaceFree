@@ -19,7 +19,10 @@ python main.py
   - **Important** - Windows, Program Files, ProgramData, and your personal folders. Never deletable here.
   - **Good** - everything else that looks normal.
 - Every finding includes a plain-English reason.
-- Tabs: Summary (biggest folders + categories), Cleanup (tick and remove), Folders (size tree), Size map (treemap).
+- **Live results:** everything updates while the scan runs - findings, biggest folders, space by file type, media, folder tree and size map. No waiting for the end.
+- **Space by file type** for *all* files (video, images, audio, documents, archives, disk images, code, apps, other), not just system junk.
+- **Open folder** buttons (and double-click / right-click) jump straight to the file or folder in Explorer for review.
+- Tabs: Summary, Cleanup (tick and remove), **Media** (every image, video and audio file with a real preview and playback), Folders (size tree), Size map (treemap).
 - Export the findings to CSV.
 
 ## Safety
